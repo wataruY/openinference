@@ -474,6 +474,16 @@ def _parse_message_data(message_data: Optional[Mapping[str, Any]]) -> Iterator[T
                 if message_tool_calls:
                     yield MESSAGE_TOOL_CALLS, message_tool_calls
 
+        # tool_calls in ollama
+        if tool_calls := kwargs.get("tool_calls"):
+            assert isinstance(tool_calls, Iterable), f"expected Iterable, found {type(tool_calls)}"
+            message_tool_calls = []
+            for tool_call in tool_calls:
+                if message_tool_call := dict(_get_tool_call_ollama(tool_call)):
+                    message_tool_calls.append(message_tool_call)
+            if message_tool_calls:
+                yield MESSAGE_TOOL_CALLS, message_tool_calls
+
 
 @stop_on_exception
 def _get_tool_call(tool_call: Optional[Mapping[str, Any]]) -> Iterator[Tuple[str, Any]]:
@@ -488,6 +498,46 @@ def _get_tool_call(tool_call: Optional[Mapping[str, Any]]) -> Iterator[Tuple[str
         if arguments := function.get("arguments"):
             assert isinstance(arguments, str), f"expected str, found {type(arguments)}"
             yield TOOL_CALL_FUNCTION_ARGUMENTS_JSON, arguments
+
+
+@stop_on_exception
+def _get_tool_call_ollama(tool_call: Optional[Mapping[str, Any]]) -> Iterator[Tuple[str, Any]]:
+    """
+    This function iterates through a tool call response from ollama and yields pairs of
+    function name and arguments.
+
+    Ollama's response format for tool calls differs slightly from the OpenAI format. This
+    function handles the specific structure of an ollama tool call response.
+
+    Args:
+        tool_call: A dictionary representing an ollama tool call response. The response
+                   is expected to be a list with a single dictionary containing 'name',
+                   'args', 'id', and 'type' keys. The 'type' value should be 'tool_call'.
+
+    Yields:
+        A tuple containing the tool function name and a JSON string representation of
+        the arguments for the tool.
+
+    Example:
+        tool_call = [{'name': 'get_weather', 'args': {'city': 'sf'}, 'id': 'xxx', 'type': 'tool_call'}]
+        for function_name, arguments in _get_tool_call_ollama(tool_call):
+            print(f'function name: {function_name}, arguments: {arguments}')
+            # Outputs:
+            # function name: TOOL_CALL_FUNCTION_NAME, arguments: "get_weather"
+            # function name: TOOL_CALL_FUNCTION_ARGUMENTS_JSON, arguments: "{\"city\": \"sf\"}"
+    """
+
+    if not tool_call:
+        return
+    assert hasattr(tool_call, "get"), f"expected Mapping, found {type(tool_call)}"
+    if t := tool_call.get("type"):
+        assert t == "tool_call", f"expected tool_call, found{t}"
+        if name := tool_call.get("name"):
+            assert isinstance(name, str), f"expected str, found {type(name)}"
+            yield TOOL_CALL_FUNCTION_NAME, name
+        if arguments := tool_call.get("args"):
+            assert isinstance(arguments, dict), f"expected dict, found {type(arguments)}"
+            yield TOOL_CALL_FUNCTION_ARGUMENTS_JSON, json.dumps(arguments)
 
 
 @stop_on_exception
